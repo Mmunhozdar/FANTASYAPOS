@@ -103,6 +103,41 @@ input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;background:#00e676;cursor:pointer;box-shadow:0 0 10px rgba(0,230,118,.5)}
 `;
 
+// ─── SPONSOR ───────────────────────────────────────────────────────────────
+const AD_LINK = "https://go.aff.partnersapostou.com/1xwo5mwf";
+const AD_IMG = "https://i.imgur.com/placeholder.png"; // fallback
+const AD_BANNER_URL = "/banner-apostou.png";
+
+const AdBanner = ({ style = {} }) => (
+  <a href={AD_LINK} target="_blank" rel="noopener noreferrer" style={{ display: "block", textAlign: "center", animation: "fadeInUp .5s ease-out", ...style }}>
+    <img src={AD_BANNER_URL} alt="Apostou - Registre-se" style={{ width: "100%", maxWidth: 380, borderRadius: 12, border: "2px solid rgba(255,166,0,.3)", boxShadow: "0 4px 20px rgba(255,166,0,.2)", cursor: "pointer", transition: "transform .2s, box-shadow .2s" }}
+      onMouseOver={e => { e.target.style.transform = "scale(1.02)"; e.target.style.boxShadow = "0 8px 30px rgba(255,166,0,.35)"; }}
+      onMouseOut={e => { e.target.style.transform = "scale(1)"; e.target.style.boxShadow = "0 4px 20px rgba(255,166,0,.2)"; }}
+      onError={e => { e.target.style.display = "none"; }}
+    />
+  </a>
+);
+
+const AdPopup = ({ onClose, countdown }) => (
+  <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.85)", backdropFilter: "blur(10px)", animation: "fadeInUp .3s ease-out" }}>
+    <div style={{ maxWidth: 380, width: "90%", textAlign: "center", padding: 20 }}>
+      <div style={{ fontSize: 13, color: "#ffd54f", fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>⚡ OFERTA DO PARCEIRO</div>
+      <a href={AD_LINK} target="_blank" rel="noopener noreferrer">
+        <img src={AD_BANNER_URL} alt="Apostou - Registre-se" style={{ width: "100%", borderRadius: 14, border: "2px solid rgba(255,166,0,.4)", boxShadow: "0 8px 40px rgba(255,166,0,.3)", cursor: "pointer", transition: "transform .2s" }}
+          onMouseOver={e => { e.target.style.transform = "scale(1.03)"; }}
+          onMouseOut={e => { e.target.style.transform = "scale(1)"; }}
+          onError={e => { e.target.onerror = null; e.target.src = ""; e.target.style.display = "none"; }}
+        />
+      </a>
+      <a href={AD_LINK} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginTop: 14, background: "linear-gradient(135deg,#ff9800,#ff6d00)", border: "none", borderRadius: 12, padding: "12px 32px", color: "#fff", fontSize: 15, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 20px rgba(255,152,0,.4)", letterSpacing: .5 }}>🎁 REGISTRE-SE E DESBLOQUEIE</a>
+      <button onClick={onClose} style={{ display: "block", margin: "16px auto 0", background: "none", border: "none", color: countdown > 0 ? "#555" : "#aaa", fontSize: 13, cursor: countdown > 0 ? "default" : "pointer", fontFamily: "inherit", fontWeight: 500, opacity: countdown > 0 ? .5 : 1, transition: "opacity .3s" }}
+        disabled={countdown > 0}>
+        {countdown > 0 ? `Ver escalação em ${countdown}s...` : "✕ Ver minha escalação"}
+      </button>
+    </div>
+  </div>
+);
+
 // ─── COMPONENTS ─────────────────────────────────────────────────────────────
 const Orb=({x,y,sz,c,d})=><div style={{position:"absolute",left:`${x}%`,top:`${y}%`,width:sz,height:sz,background:`radial-gradient(circle,${c}40,transparent 70%)`,borderRadius:"50%",filter:"blur(40px)",animation:`float ${6+d}s ease-in-out infinite alternate`,animationDelay:`${d}s`,pointerEvents:"none"}}/>;
 
@@ -210,6 +245,9 @@ function ClosedScreen({ status, onRetry }) {
           </div>
         )}
 
+        {/* Sponsor */}
+        <AdBanner style={{ marginBottom: 24, maxWidth: 380, width: "100%" }} />
+
         {/* Retry */}
         <button onClick={handleRetry} disabled={retrying} style={{ background: retrying ? "rgba(255,255,255,.03)" : "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.15)", borderRadius: 12, padding: "14px 28px", color: retrying ? "#666" : "#fff", fontSize: 14, fontWeight: 600, cursor: retrying ? "wait" : "pointer", transition: "all .2s", display: "flex", alignItems: "center", gap: 8 }}
           onMouseOver={(e) => { if(!retrying){ e.currentTarget.style.background="rgba(0,230,118,.12)"; e.currentTarget.style.borderColor="#00e676"; e.currentTarget.style.color="#00e676"; }}}
@@ -240,6 +278,9 @@ export default function ApostometroFantasy() {
   const [isTyping, setIsTyping] = useState(false);
   const [showPitch, setShowPitch] = useState(false);
   const [budgetInput, setBudgetInput] = useState("110");
+  const [showAdPopup, setShowAdPopup] = useState(false);
+  const [adCountdown, setAdCountdown] = useState(0);
+  const [pendingResult, setPendingResult] = useState(null);
   const [players, setPlayers] = useState([]);
   const [clubs, setClubs] = useState({});
   const [positions, setPositions] = useState({});
@@ -293,10 +334,34 @@ export default function ApostometroFantasy() {
   const pickBudget = () => { const b = parseFloat(budgetInput) || 110; setBudget(b); userMsg(`C$ ${b.toFixed(2)}`); setTimeout(() => { botMsg(`C$ ${b.toFixed(2)} 💰`); setTimeout(() => { setStep("strategy"); botMsg("Estratégia?"); }, 600); }, 300); };
   const pickStrat = (s) => { const lb = { aggressive: "🔥 Agressiva", conservative: "🛡️ Conservadora", value: "💎 Custo-Benefício", balanced: "⚖️ Equilibrada" }; setStrategy(s); userMsg(lb[s]);
     setTimeout(() => { botMsg(`Analisando ${players.length} jogadores... 🔍`); setTimeout(() => { botMsg("Otimizando... 📊");
-      setTimeout(() => { const r = optimize(players, clubs, formation, budget, s); setLineup(r); setStep("result"); botMsg(analysis(r, clubs)); setTimeout(() => { setShowPitch(true); botMsg("👆 Escalação acima!"); }, 600); }, 1200);
+      setTimeout(() => {
+        const r = optimize(players, clubs, formation, budget, s);
+        setPendingResult(r);
+        setAdCountdown(5);
+        setShowAdPopup(true);
+      }, 1200);
     }, 800); }, 300);
   };
-  const reset = () => { setStep("formation"); setFormation(null); setBudget(110); setBudgetInput("110"); setStrategy(null); setLineup(null); setMessages([]); setShowPitch(false); setTimeout(() => botMsg("Nova escalação! Formação?", 300), 100); };
+
+  // Ad popup countdown
+  useEffect(() => {
+    if (!showAdPopup || adCountdown <= 0) return;
+    const t = setTimeout(() => setAdCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [showAdPopup, adCountdown]);
+
+  const closeAdPopup = () => {
+    setShowAdPopup(false);
+    if (pendingResult) {
+      setLineup(pendingResult);
+      setStep("result");
+      botMsg(analysis(pendingResult, clubs));
+      setTimeout(() => { setShowPitch(true); botMsg("👆 Escalação acima!"); }, 600);
+      setPendingResult(null);
+    }
+  };
+
+  const reset = () => { setStep("formation"); setFormation(null); setBudget(110); setBudgetInput("110"); setStrategy(null); setLineup(null); setMessages([]); setShowPitch(false); setPendingResult(null); setShowAdPopup(false); setTimeout(() => botMsg("Nova escalação! Formação?", 300), 100); };
 
   if (appState === "loading") return (
     <div style={{ minHeight: "100vh", background: "#050a0f", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "'Outfit', sans-serif" }}>
@@ -315,6 +380,9 @@ export default function ApostometroFantasy() {
     <div style={{ minHeight: "100vh", background: "#050a0f", fontFamily: "'Outfit','DM Sans',sans-serif", color: "#e0e0e0", position: "relative", overflow: "hidden" }}>
       <style>{CSS}</style>
       <Orb x={10} y={20} sz="300px" c="#00e676" d={0} /><Orb x={70} y={60} sz="250px" c="#2979ff" d={2} /><Orb x={40} y={80} sz="200px" c="#ffd54f" d={4} />
+
+      {/* AD POPUP */}
+      {showAdPopup && <AdPopup onClose={closeAdPopup} countdown={adCountdown} />}
 
       <div style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(5,10,15,.85)", backdropFilter: "blur(20px)", borderBottom: "1px solid rgba(255,255,255,.06)", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -354,6 +422,7 @@ export default function ApostometroFantasy() {
                 <div style={{ display: "flex", gap: 12, fontFamily: "'Space Mono',monospace" }}><span style={{ color: "#ffd54f" }}>C$ {lineup.totalCost.toFixed(1)}</span><span style={{ color: "#00e676" }}>{lineup.expectedPoints.toFixed(1)} pts</span></div>
               </div>
             </div>
+            <AdBanner style={{ marginTop: 12, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }} />
           </div>
         )}
 
