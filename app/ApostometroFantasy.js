@@ -37,26 +37,46 @@ function normClub(c) { const a=c.abreviacao||"???"; return { id:c.id, nome:c.nom
 const FORMS = { "3-4-3":{z:3,l:0,m:4,a:3},"3-5-2":{z:3,l:0,m:5,a:2},"4-3-3":{z:2,l:2,m:3,a:3},"4-4-2":{z:2,l:2,m:4,a:2},"4-5-1":{z:2,l:2,m:5,a:1},"5-3-2":{z:3,l:2,m:3,a:2},"5-4-1":{z:3,l:2,m:4,a:1} };
 
 // ─── OPTIMIZER ──────────────────────────────────────────────────────────────
+// ALWAYS returns exactly 11 jogadores + 1 técnico = 12 players
 function optimize(players, clubs, formation, budget, strategy) {
   const f=FORMS[formation]; if(!f) return null;
   const needs={1:1,2:f.l,3:f.z,4:f.m,5:f.a,6:1};
-  const total=Object.values(needs).reduce((a,b)=>a+b,0);
+  const REQUIRED_TOTAL=12;
   const avail=players.filter(p=>p.status_id===7&&p.jogos>0);
   const score=(p)=>{const r=p.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;switch(strategy){case"aggressive":return r*1.3+p.variacao*2+p.media*.5;case"conservative":return p.media*1.5+(p.jogos/8)*2-Math.abs(p.variacao)*.5;case"value":return(p.media/Math.max(p.preco,1))*10+r*.3;default:return r*.8+p.media*.8+p.variacao+p.jogos/8*1.5;}};
   let rem=budget; const sel=[];
-  for(const pid of [5,4,1,3,2,6]){const cnt=needs[pid]||0;if(!cnt)continue;const cands=avail.filter(p=>p.posicao_id===pid&&!sel.find(s=>s.id===p.id)).map(p=>({...p,sc:score(p)})).sort((a,b)=>b.sc-a.sc);let pk=0;for(const c of cands){if(pk>=cnt)break;const sl=total-sel.length-1;if(c.preco<=rem-sl*3.5||sl<=0){sel.push(c);rem-=c.preco;pk++;}}if(pk<cnt){const ch=cands.filter(c=>!sel.find(s=>s.id===c.id)).sort((a,b)=>a.preco-b.preco);for(const c of ch){if(pk>=cnt)break;if(c.preco<=rem){sel.push(c);rem-=c.preco;pk++;}}}}
+  for(const pid of [5,4,1,3,2,6]){
+    const cnt=needs[pid]||0;if(!cnt)continue;
+    const cands=avail.filter(p=>p.posicao_id===pid&&!sel.find(s=>s.id===p.id)).map(p=>({...p,sc:score(p)})).sort((a,b)=>b.sc-a.sc);
+    let pk=0;
+    // Pass 1: best scored within budget
+    for(const c of cands){if(pk>=cnt)break;const sl=REQUIRED_TOTAL-sel.length-1;const minRest=sl*3.0;if(c.preco<=rem-minRest||sl<=0){sel.push(c);rem-=c.preco;pk++;}}
+    // Pass 2: force cheapest if slots still unfilled (mandatory - completing 12 is required)
+    if(pk<cnt){const cheap=cands.filter(c=>!sel.find(s=>s.id===c.id)).sort((a,b)=>a.preco-b.preco);for(const c of cheap){if(pk>=cnt)break;sel.push(c);rem-=c.preco;pk++;}}
+  }
+  // Hard validation
+  if(sel.length!==REQUIRED_TOTAL){return{players:[],formation,strategy,totalCost:0,remaining:budget,totalMedia:0,expectedPoints:0,overBudget:false,error:`Erro: ${sel.length}/12 escalados. Aumente o orçamento.`};}
+  for(const[pid,cnt]of Object.entries(needs)){if(sel.filter(p=>p.posicao_id===+pid).length!==cnt){return{players:[],formation,strategy,totalCost:0,remaining:budget,totalMedia:0,expectedPoints:0,overBudget:false,error:`Erro de posição.`};}}
   const tc=sel.reduce((a,p)=>a+p.preco,0);const ep=sel.reduce((a,p)=>a+p.pontos_ultimas_3.reduce((x,y)=>x+y,0)/3,0);
-  return{players:sel,formation,strategy,totalCost:+tc.toFixed(2),remaining:+(budget-tc).toFixed(2),totalMedia:+sel.reduce((a,p)=>a+p.media,0).toFixed(2),expectedPoints:+ep.toFixed(2)};
+  const overBudget=tc>budget;
+  return{players:sel,formation,strategy,totalCost:+tc.toFixed(2),remaining:+(budget-tc).toFixed(2),totalMedia:+sel.reduce((a,p)=>a+p.media,0).toFixed(2),expectedPoints:+ep.toFixed(2),overBudget};
 }
 
 function analysis(L,clubs){
-  if(!L?.players?.length) return "Orçamento insuficiente. Tente aumentar o valor.";
+  if(!L||L.error) return L?.error||"Não foi possível gerar escalação.";
+  if(!L.players?.length) return "Não foi possível gerar escalação. Tente outro orçamento.";
+  const jogadores=L.players.filter(p=>p.posicao_id!==6).length;
+  const tecnicos=L.players.filter(p=>p.posicao_id===6).length;
   const top=[...L.players].sort((a,b)=>(b.pontos_ultimas_3.reduce((x,y)=>x+y,0)/3)-(a.pontos_ultimas_3.reduce((x,y)=>x+y,0)/3))[0];
   const ris=[...L.players].sort((a,b)=>b.variacao-a.variacao)[0];
   const ta=top.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;const g=id=>clubs[id]?.abreviacao||"???";
   const sl={aggressive:"Agressiva 🔥",conservative:"Conservadora 🛡️",value:"Custo-Benefício 💎",balanced:"Equilibrada ⚖️"};
   const tp={aggressive:"Potencial de mitada! Risco maior.",conservative:"Consistência e segurança.",value:"Melhor custo/pontuação.",balanced:"Equilíbrio perfeito."};
-  return `⚡ ESCALAÇÃO GERADA!\n\n📊 ${L.formation} | ${sl[L.strategy]}\n💰 C$ ${L.totalCost.toFixed(2)} (Sobram C$ ${L.remaining.toFixed(2)})\n📈 Esperado: ${L.expectedPoints.toFixed(1)} pts | Média: ${L.totalMedia.toFixed(1)} pts\n\n🔥 ${top.apelido} (${g(top.clube_id)}) — ${ta.toFixed(1)} pts/rod\n📈 ${ris.apelido} (${g(ris.clube_id)}) +C$ ${ris.variacao.toFixed(2)}\n\n💡 ${tp[L.strategy]}`;
+  let text=`⚡ ESCALAÇÃO GERADA!\n\n📊 ${L.formation} | ${sl[L.strategy]}\n👥 ${jogadores} jogadores + ${tecnicos} técnico = ${jogadores+tecnicos} escalados\n💰 C$ ${L.totalCost.toFixed(2)}`;
+  if(L.overBudget){text+=` ⚠️ (C$ ${Math.abs(L.remaining).toFixed(2)} acima do orçamento)`;}else{text+=` (Sobram C$ ${L.remaining.toFixed(2)})`;}
+  text+=`\n📈 Esperado: ${L.expectedPoints.toFixed(1)} pts | Média: ${L.totalMedia.toFixed(1)} pts\n\n🔥 ${top.apelido} (${g(top.clube_id)}) — ${ta.toFixed(1)} pts/rod\n📈 ${ris.apelido} (${g(ris.clube_id)}) +C$ ${ris.variacao.toFixed(2)}\n\n💡 ${tp[L.strategy]}`;
+  if(L.overBudget) text+=`\n\n⚠️ Orçamento apertado. Considere aumentar para C$ ${(L.totalCost+5).toFixed(0)}+`;
+  return text;
 }
 
 // ─── DATE FORMAT ────────────────────────────────────────────────────────────
@@ -308,7 +328,7 @@ export default function ApostometroFantasy() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 65px)" }}>
-        {showPitch && lineup && (
+        {showPitch && lineup && lineup.players?.length===12 && (
           <div style={{ padding: "16px 16px 0", animation: "slideDown .6s ease-out" }}>
             <Pitch L={lineup} clubs={clubs} />
             <div style={{ margin: "12px auto 0", maxWidth: 420, background: "rgba(255,255,255,.03)", borderRadius: 12, border: "1px solid rgba(255,255,255,.06)", overflow: "hidden" }}>
