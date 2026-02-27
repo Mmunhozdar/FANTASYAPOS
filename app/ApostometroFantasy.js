@@ -42,12 +42,45 @@ function optimize(players, clubs, formation, budget, strategy) {
   const REQUIRED_TOTAL=12;
   const avail=players.filter(p=>p.status_id===7&&p.jogos>0);
   const score=(p)=>{const r=p.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;switch(strategy){case"aggressive":return r*1.3+p.variacao*2+p.media*.5;case"conservative":return p.media*1.5+(p.jogos/8)*2-Math.abs(p.variacao)*.5;case"value":return(p.media/Math.max(p.preco,1))*10+r*.3;default:return r*.8+p.media*.8+p.variacao+p.jogos/8*1.5;}};
+
+  // Pre-calculate the cheapest player per position for accurate budget reservation
+  const minPrice={};
+  for(const pid of [1,2,3,4,5,6]){
+    const cheapest=avail.filter(p=>p.posicao_id===pid).sort((a,b)=>a.preco-b.preco)[0];
+    minPrice[pid]=cheapest?cheapest.preco:3;
+  }
+
+  // Calculate minimum cost to fill remaining positions
+  const calcMinRemaining=(selSoFar,currentPid)=>{
+    let minCost=0;
+    for(const[pidStr,cnt]of Object.entries(needs)){
+      const pid=+pidStr;
+      if(pid===currentPid) continue; // skip current position being filled
+      const already=selSoFar.filter(p=>p.posicao_id===pid).length;
+      const still=cnt-already;
+      if(still>0) minCost+=still*minPrice[pid];
+    }
+    return minCost;
+  };
+
   let rem=budget; const sel=[];
+  // Fill positions: prioritize expensive positions first to use budget wisely
   for(const pid of [5,4,1,3,2,6]){
     const cnt=needs[pid]||0;if(!cnt)continue;
     const cands=avail.filter(p=>p.posicao_id===pid&&!sel.find(s=>s.id===p.id)).map(p=>({...p,sc:score(p)})).sort((a,b)=>b.sc-a.sc);
     let pk=0;
-    for(const c of cands){if(pk>=cnt)break;const sl=REQUIRED_TOTAL-sel.length-1;const minRest=sl*3.0;if(c.preco<=rem-minRest||sl<=0){sel.push(c);rem-=c.preco;pk++;}}
+    // Pass 1: pick best scored that fit within budget (reserving minimum for remaining positions)
+    for(const c of cands){
+      if(pk>=cnt)break;
+      const slotsLeftInPos=cnt-pk-1; // remaining slots in THIS position after picking this player
+      const minForThisPos=slotsLeftInPos*minPrice[pid]; // minimum to fill rest of this position
+      const minForOtherPos=calcMinRemaining([...sel,c],pid); // minimum to fill other positions
+      const minReserve=minForThisPos+minForOtherPos;
+      if(c.preco<=rem-minReserve||sel.length+pk>=REQUIRED_TOTAL-1){
+        sel.push(c);rem-=c.preco;pk++;
+      }
+    }
+    // Pass 2: force cheapest if slots unfilled
     if(pk<cnt){const cheap=cands.filter(c=>!sel.find(s=>s.id===c.id)).sort((a,b)=>a.preco-b.preco);for(const c of cheap){if(pk>=cnt)break;sel.push(c);rem-=c.preco;pk++;}}
   }
   if(sel.length!==REQUIRED_TOTAL){return{players:[],formation,strategy,totalCost:0,remaining:budget,totalMedia:0,expectedPoints:0,overBudget:false,error:`Erro: ${sel.length}/12 escalados. Aumente o orçamento.`};}
