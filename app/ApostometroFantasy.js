@@ -331,9 +331,13 @@ export default function MitouFC() {
   };
 
   useEffect(() => {
-    if (!showAdPopup || adCountdown <= 0) return;
-    const t = setTimeout(() => setAdCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
+    if (!showAdPopup) return;
+    if (adCountdown > 0) {
+      const t = setTimeout(() => setAdCountdown(c => c - 1), 1000);
+      return () => clearTimeout(t);
+    }
+    // Countdown finished — open sponsor link automatically
+    window.open(AD_LINK, "_blank", "noopener,noreferrer");
   }, [showAdPopup, adCountdown]);
 
   const closeAdPopup = () => {
