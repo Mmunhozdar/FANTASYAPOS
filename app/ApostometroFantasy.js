@@ -91,12 +91,21 @@ function optimize(players, clubs, formation, budget, strategy) {
   const fieldPlayers=sel.filter(p=>p.posicao_id!==6);
   const captain=fieldPlayers.reduce((best,p)=>{const r=p.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;const br=best.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;return r>br?p:best;},fieldPlayers[0]);
 
-  // ─── 5 RESERVAS: melhor disponível por posição (GOL, LAT, ZAG, MEI, ATA) ───
+  // ─── 5 RESERVAS: melhor disponível por posição, mais barato que titulares ───
   const selIds=new Set(sel.map(p=>p.id));
   const reserves=[];
   for(const pid of [1,2,3,4,5]){
-    const best=avail.filter(p=>p.posicao_id===pid&&!selIds.has(p.id)).map(p=>({...p,sc:score(p)})).sort((a,b)=>b.sc-a.sc)[0];
-    if(best) reserves.push(best);
+    // Find the cheapest titular in this position (or similar position group)
+    const titularesPos=sel.filter(p=>p.posicao_id===pid);
+    const maxReservePrice=titularesPos.length>0 ? Math.min(...titularesPos.map(p=>p.preco)) : Infinity;
+    // Pick best scored reserve that is cheaper than cheapest titular
+    const candidates=avail.filter(p=>p.posicao_id===pid&&!selIds.has(p.id)&&p.preco<maxReservePrice).map(p=>({...p,sc:score(p)})).sort((a,b)=>b.sc-a.sc);
+    if(candidates.length>0){reserves.push(candidates[0]);}
+    else{
+      // Fallback: if no one cheaper, pick cheapest available
+      const fallback=avail.filter(p=>p.posicao_id===pid&&!selIds.has(p.id)).sort((a,b)=>a.preco-b.preco)[0];
+      if(fallback) reserves.push(fallback);
+    }
   }
 
   return{players:sel,formation,strategy,totalCost:+tc.toFixed(2),remaining:+(budget-tc).toFixed(2),totalMedia:+sel.reduce((a,p)=>a+p.media,0).toFixed(2),expectedPoints:+ep.toFixed(2),overBudget:tc>budget,captain,reserves};
