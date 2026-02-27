@@ -8,20 +8,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // ═══════════════════════════════════════════════════════════════════════════
 
 const MERCADO_ABERTO = 1;
-const API_URLS = ["https://api.cartola.globo.com", "https://api.cartolafc.globo.com"];
 
-// ─── API ────────────────────────────────────────────────────────────────────
+// ─── API (via proxy local — sem CORS) ───────────────────────────────────────
 async function apiFetch(path, timeout = 10000) {
-  for (const base of API_URLS) {
-    try {
-      const c = new AbortController();
-      const t = setTimeout(() => c.abort(), timeout);
-      const r = await fetch(`${base}${path}`, { signal: c.signal, headers: { Accept: "application/json" }, mode: "cors" });
-      clearTimeout(t);
-      if (r.ok) { console.log(`[API] OK ${base}${path}`); return await r.json(); }
-      console.warn(`[API] ${r.status} ${base}${path}`);
-    } catch (e) { console.warn(`[API] fail ${base}${path}:`, e.message); }
-  }
+  try {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), timeout);
+    const r = await fetch(`/api/cartola${path}`, { signal: c.signal, headers: { Accept: "application/json" } });
+    clearTimeout(t);
+    if (r.ok) { console.log(`[API] OK /api/cartola${path}`); return await r.json(); }
+    console.warn(`[API] ${r.status} /api/cartola${path}`);
+  } catch (e) { console.warn(`[API] fail /api/cartola${path}:`, e.message); }
   return null;
 }
 
