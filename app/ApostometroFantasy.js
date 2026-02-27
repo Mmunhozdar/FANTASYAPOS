@@ -35,7 +35,7 @@ function normClub(c) { const a=c.abreviacao||"???"; return { id:c.id, nome:c.nom
 // ─── FORMATIONS ─────────────────────────────────────────────────────────────
 const FORMS = { "3-4-3":{z:3,l:0,m:4,a:3},"3-5-2":{z:3,l:0,m:5,a:2},"4-3-3":{z:2,l:2,m:3,a:3},"4-4-2":{z:2,l:2,m:4,a:2},"4-5-1":{z:2,l:2,m:5,a:1},"5-3-2":{z:3,l:2,m:3,a:2},"5-4-1":{z:3,l:2,m:4,a:1} };
 
-// ─── OPTIMIZER (always 11 + 1 TEC = 12) ────────────────────────────────────
+// ─── OPTIMIZER (11 titulares + 1 TEC + capitão + 5 reservas) ────────────────
 function optimize(players, clubs, formation, budget, strategy) {
   const f=FORMS[formation]; if(!f) return null;
   const needs={1:1,2:f.l,3:f.z,4:f.m,5:f.a,6:1};
@@ -53,7 +53,20 @@ function optimize(players, clubs, formation, budget, strategy) {
   if(sel.length!==REQUIRED_TOTAL){return{players:[],formation,strategy,totalCost:0,remaining:budget,totalMedia:0,expectedPoints:0,overBudget:false,error:`Erro: ${sel.length}/12 escalados. Aumente o orçamento.`};}
   for(const[pid,cnt]of Object.entries(needs)){if(sel.filter(p=>p.posicao_id===+pid).length!==cnt){return{players:[],formation,strategy,totalCost:0,remaining:budget,totalMedia:0,expectedPoints:0,overBudget:false,error:`Erro de posição.`};}}
   const tc=sel.reduce((a,p)=>a+p.preco,0);const ep=sel.reduce((a,p)=>a+p.pontos_ultimas_3.reduce((x,y)=>x+y,0)/3,0);
-  return{players:sel,formation,strategy,totalCost:+tc.toFixed(2),remaining:+(budget-tc).toFixed(2),totalMedia:+sel.reduce((a,p)=>a+p.media,0).toFixed(2),expectedPoints:+ep.toFixed(2),overBudget:tc>budget};
+
+  // ─── CAPITÃO: jogador de campo com maior pontuação esperada ───
+  const fieldPlayers=sel.filter(p=>p.posicao_id!==6);
+  const captain=fieldPlayers.reduce((best,p)=>{const r=p.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;const br=best.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;return r>br?p:best;},fieldPlayers[0]);
+
+  // ─── 5 RESERVAS: melhor disponível por posição (GOL, LAT, ZAG, MEI, ATA) ───
+  const selIds=new Set(sel.map(p=>p.id));
+  const reserves=[];
+  for(const pid of [1,2,3,4,5]){
+    const best=avail.filter(p=>p.posicao_id===pid&&!selIds.has(p.id)).map(p=>({...p,sc:score(p)})).sort((a,b)=>b.sc-a.sc)[0];
+    if(best) reserves.push(best);
+  }
+
+  return{players:sel,formation,strategy,totalCost:+tc.toFixed(2),remaining:+(budget-tc).toFixed(2),totalMedia:+sel.reduce((a,p)=>a+p.media,0).toFixed(2),expectedPoints:+ep.toFixed(2),overBudget:tc>budget,captain,reserves};
 }
 
 function analysis(L,clubs){
@@ -61,14 +74,15 @@ function analysis(L,clubs){
   if(!L.players?.length) return "Não foi possível gerar escalação. Tente outro orçamento.";
   const jog=L.players.filter(p=>p.posicao_id!==6).length;
   const tec=L.players.filter(p=>p.posicao_id===6).length;
-  const top=[...L.players].sort((a,b)=>(b.pontos_ultimas_3.reduce((x,y)=>x+y,0)/3)-(a.pontos_ultimas_3.reduce((x,y)=>x+y,0)/3))[0];
-  const ris=[...L.players].sort((a,b)=>b.variacao-a.variacao)[0];
-  const ta=top.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;const g=id=>clubs[id]?.abreviacao||"???";
+  const g=id=>clubs[id]?.abreviacao||"???";
   const sl={aggressive:"Agressiva ⚡",conservative:"Conservadora 🛡️",value:"Custo-Benefício 💎",balanced:"Equilibrada ⚖️"};
   const tp={aggressive:"MITADA na certa! Risco alto, recompensa gigante.",conservative:"Sem negativar. Consistência é a chave.",value:"Máximo de pontos por Cartoleta investida.",balanced:"O caminho do meio: segurança com potencial."};
   let text=`⚡ MITOU! ESCALAÇÃO PRONTA!\n\n📊 ${L.formation} | ${sl[L.strategy]}\n👥 ${jog} jogadores + ${tec} técnico = ${jog+tec} escalados\n💰 C$ ${L.totalCost.toFixed(2)}`;
   if(L.overBudget){text+=` ⚠️ (C$ ${Math.abs(L.remaining).toFixed(2)} acima)`;}else{text+=` (Sobram C$ ${L.remaining.toFixed(2)})`;}
-  text+=`\n📈 Esperado: ${L.expectedPoints.toFixed(1)} pts | Média: ${L.totalMedia.toFixed(1)} pts\n\n🔥 Craque: ${top.apelido} (${g(top.clube_id)}) — ${ta.toFixed(1)} pts/rod\n📈 Valorizando: ${ris.apelido} (${g(ris.clube_id)}) +C$ ${ris.variacao.toFixed(2)}\n\n💡 ${tp[L.strategy]}`;
+  text+=`\n📈 Esperado: ${L.expectedPoints.toFixed(1)} pts | Média: ${L.totalMedia.toFixed(1)} pts`;
+  if(L.captain){const ca=L.captain.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;text+=`\n\n🏅 Capitão: ${L.captain.apelido} (${g(L.captain.clube_id)}) — ${ca.toFixed(1)} pts/rod (pontos em dobro!)`;}
+  if(L.reserves?.length){text+=`\n\n🔄 Reservas:`;L.reserves.forEach(r=>{text+=`\n   ${MPOS[r.posicao_id]?.abreviacao||"?"} ${r.apelido} (${g(r.clube_id)})`;});}
+  text+=`\n\n💡 ${tp[L.strategy]}`;
   if(L.overBudget) text+=`\n\n⚠️ Orçamento apertado. Tente C$ ${(L.totalCost+5).toFixed(0)}+`;
   return text;
 }
@@ -133,22 +147,23 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
 // ─── COMPONENTS ─────────────────────────────────────────────────────────────
 const Orb=({x,y,sz,c,d})=><div style={{position:"absolute",left:`${x}%`,top:`${y}%`,width:sz,height:sz,background:`radial-gradient(circle,${c}35,transparent 70%)`,borderRadius:"50%",filter:"blur(50px)",animation:`float ${6+d}s ease-in-out infinite alternate`,animationDelay:`${d}s`,pointerEvents:"none"}}/>;
 
-const PCard=({p,clubs,sm})=>{const cl=clubs[p.clube_id];const r=p.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;return(
-  <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:sm?2:4,animation:"fadeInUp .5s ease-out forwards"}}>
-    <div style={{width:sm?42:54,height:sm?42:54,borderRadius:"50%",background:`linear-gradient(145deg,${cl?.cor||"#333"},${cl?.cor||"#333"}99)`,border:"2px solid rgba(255,255,255,.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:sm?9:11,fontWeight:800,color:"#fff",textShadow:"0 1px 3px rgba(0,0,0,.6)",boxShadow:`0 4px 15px ${cl?.cor||"#333"}50`,position:"relative",overflow:"hidden"}}>
+const PCard=({p,clubs,sm,isCaptain})=>{const cl=clubs[p.clube_id];const r=p.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3;return(
+  <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:sm?2:4,animation:"fadeInUp .5s ease-out forwards",position:"relative"}}>
+    {isCaptain&&<div style={{position:"absolute",top:sm?-6:-8,right:sm?-2:-4,zIndex:2,background:"linear-gradient(135deg,#FFC107,#FF8F00)",borderRadius:"50%",width:sm?16:20,height:sm?16:20,display:"flex",alignItems:"center",justifyContent:"center",fontSize:sm?8:10,fontWeight:900,color:"#0a0a0a",border:"2px solid #0a0f18",boxShadow:"0 2px 8px rgba(255,193,7,.5)"}}>C</div>}
+    <div style={{width:sm?42:54,height:sm?42:54,borderRadius:"50%",background:`linear-gradient(145deg,${cl?.cor||"#333"},${cl?.cor||"#333"}99)`,border:isCaptain?"2px solid #FFC107":"2px solid rgba(255,255,255,.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:sm?9:11,fontWeight:800,color:"#fff",textShadow:"0 1px 3px rgba(0,0,0,.6)",boxShadow:isCaptain?`0 4px 15px rgba(255,193,7,.4)`:`0 4px 15px ${cl?.cor||"#333"}50`,position:"relative",overflow:"hidden"}}>
       <div style={{position:"absolute",inset:0,background:"linear-gradient(180deg,rgba(255,255,255,.2),transparent 50%)"}}/><span style={{position:"relative",zIndex:1,letterSpacing:1}}>{cl?.abreviacao||"?"}</span>
     </div>
-    <div style={{background:"rgba(10,22,40,.85)",backdropFilter:"blur(10px)",borderRadius:8,padding:sm?"2px 6px":"3px 8px",border:"1px solid rgba(255,193,7,.15)",textAlign:"center",minWidth:sm?58:72}}>
-      <div style={{fontSize:sm?9:10,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:sm?62:82}}>{p.apelido}</div>
-      <div style={{fontSize:sm?7:8,color:"#FFC107",fontWeight:700,fontFamily:"'Space Mono',monospace"}}>C${p.preco.toFixed(1)} · {r.toFixed(1)}</div>
+    <div style={{background:"rgba(10,22,40,.85)",backdropFilter:"blur(10px)",borderRadius:8,padding:sm?"2px 6px":"3px 8px",border:isCaptain?"1px solid rgba(255,193,7,.4)":"1px solid rgba(255,193,7,.15)",textAlign:"center",minWidth:sm?58:72}}>
+      <div style={{fontSize:sm?9:10,fontWeight:700,color:isCaptain?"#FFC107":"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:sm?62:82}}>{p.apelido}</div>
+      <div style={{fontSize:sm?7:8,color:isCaptain?"#FFE082":"#FFC107",fontWeight:700,fontFamily:"'Space Mono',monospace"}}>C${p.preco.toFixed(1)} · {r.toFixed(1)}</div>
     </div>
   </div>
 )};
 
-const Pitch=({L,clubs})=>{if(!L?.players?.length)return null;const g=L.players.filter(p=>p.posicao_id===1),l=L.players.filter(p=>p.posicao_id===2),z=L.players.filter(p=>p.posicao_id===3),m=L.players.filter(p=>p.posicao_id===4),a=L.players.filter(p=>p.posicao_id===5),t=L.players.filter(p=>p.posicao_id===6);const d=[];if(l[0])d.push(l[0]);d.push(...z);if(l[1])d.push(l[1]);const rows=[a,m,d,g],tops=["12%","36%","60%","82%"];return(
+const Pitch=({L,clubs,captain})=>{if(!L?.players?.length)return null;const g=L.players.filter(p=>p.posicao_id===1),l=L.players.filter(p=>p.posicao_id===2),z=L.players.filter(p=>p.posicao_id===3),m=L.players.filter(p=>p.posicao_id===4),a=L.players.filter(p=>p.posicao_id===5),t=L.players.filter(p=>p.posicao_id===6);const d=[];if(l[0])d.push(l[0]);d.push(...z);if(l[1])d.push(l[1]);const rows=[a,m,d,g],tops=["12%","36%","60%","82%"];const capId=captain?.id;return(
   <div style={{position:"relative",width:"100%",maxWidth:420,aspectRatio:"3/4",margin:"0 auto",background:"linear-gradient(180deg,#0d3320 0%,#145a2e 25%,#0d3320 50%,#145a2e 75%,#0d3320 100%)",borderRadius:16,overflow:"hidden",border:"2px solid rgba(255,193,7,.2)",boxShadow:"0 20px 60px rgba(0,0,0,.5),inset 0 0 80px rgba(0,0,0,.2)"}}>
     <svg viewBox="0 0 300 400" style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:.12}}><rect x="10" y="10" width="280" height="380" rx="4" fill="none" stroke="white" strokeWidth="1.5"/><line x1="10" y1="200" x2="290" y2="200" stroke="white" strokeWidth="1.5"/><circle cx="150" cy="200" r="40" fill="none" stroke="white" strokeWidth="1.5"/><circle cx="150" cy="200" r="3" fill="white"/><rect x="80" y="10" width="140" height="60" fill="none" stroke="white" strokeWidth="1.5"/><rect x="80" y="330" width="140" height="60" fill="none" stroke="white" strokeWidth="1.5"/></svg>
-    {rows.map((row,ri)=><div key={ri} style={{position:"absolute",left:0,right:0,top:tops[ri],display:"flex",justifyContent:"space-evenly",alignItems:"center",padding:"0 8px",transform:"translateY(-50%)"}}>{row.map(p=><PCard key={p.id} p={p} clubs={clubs} sm={row.length>3}/>)}</div>)}
+    {rows.map((row,ri)=><div key={ri} style={{position:"absolute",left:0,right:0,top:tops[ri],display:"flex",justifyContent:"space-evenly",alignItems:"center",padding:"0 8px",transform:"translateY(-50%)"}}>{row.map(p=><PCard key={p.id} p={p} clubs={clubs} sm={row.length>3} isCaptain={p.id===capId}/>)}</div>)}
     {t[0]&&<div style={{position:"absolute",bottom:6,right:10,display:"flex",alignItems:"center",gap:4,background:"rgba(10,22,40,.8)",borderRadius:8,padding:"3px 10px",border:"1px solid rgba(255,193,7,.2)"}}><span style={{fontSize:10}}>🎩</span><span style={{fontSize:10,color:"#FFC107",fontWeight:700}}>{t[0].apelido}</span></div>}
   </div>
 )};
@@ -387,17 +402,34 @@ export default function MitouFC() {
       {/* Content */}
       <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 58px)" }}>
         {showPitch && lineup && lineup.players?.length === 12 && (
-          <div style={{ padding: "16px 16px 0", animation: "slideDown .6s ease-out" }}>
-            <Pitch L={lineup} clubs={clubs} />
+          <div style={{ padding: "16px 16px 0", animation: "slideDown .6s ease-out", overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>
+            {/* Banner on top */}
+            <AdBanner style={{ marginBottom: 12, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }} />
+
+            {/* Pitch */}
+            <Pitch L={lineup} clubs={clubs} captain={lineup.captain} />
+
+            {/* Captain highlight */}
+            {lineup.captain && (
+              <div style={{ margin: "12px auto 0", maxWidth: 420, background: "rgba(255,193,7,.06)", borderRadius: 12, border: "1px solid rgba(255,193,7,.15)", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#FFC107,#FF8F00)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: "#0a0a0a", flexShrink: 0 }}>C</div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "#FFC107" }}>CAPITÃO — {lineup.captain.apelido}</div>
+                  <div style={{ fontSize: 10, color: "#888" }}>{clubs[lineup.captain.clube_id]?.abreviacao} · {MPOS[lineup.captain.posicao_id]?.abreviacao} · Pontos em dobro · {(lineup.captain.pontos_ultimas_3.reduce((a,b)=>a+b,0)/3).toFixed(1)} pts/rod</div>
+                </div>
+              </div>
+            )}
+
+            {/* Titulares table */}
             <div style={{ margin: "12px auto 0", maxWidth: 420, background: "rgba(255,255,255,.02)", borderRadius: 12, border: "1px solid rgba(255,193,7,.1)", overflow: "hidden" }}>
               <div style={{ padding: "8px 12px", background: "rgba(255,193,7,.05)", borderBottom: "1px solid rgba(255,193,7,.08)", display: "flex", justifyContent: "space-between", fontSize: 10, fontWeight: 700, color: "#666", letterSpacing: 1, textTransform: "uppercase" }}>
-                <span>Jogador</span><div style={{ display: "flex", gap: 16 }}><span style={{ width: 40, textAlign: "right" }}>Preço</span><span style={{ width: 35, textAlign: "right" }}>Média</span><span style={{ width: 40, textAlign: "right" }}>Expect.</span></div>
+                <span>Titulares</span><div style={{ display: "flex", gap: 16 }}><span style={{ width: 40, textAlign: "right" }}>Preço</span><span style={{ width: 35, textAlign: "right" }}>Média</span><span style={{ width: 40, textAlign: "right" }}>Expect.</span></div>
               </div>
-              {lineup.players.sort((a, b) => a.posicao_id - b.posicao_id).map((p, i) => { const r = p.pontos_ultimas_3.reduce((a, b) => a + b, 0) / 3; const ps = positions[p.posicao_id] || MPOS[p.posicao_id]; return (
-                <div key={p.id} style={{ padding: "7px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: i < lineup.players.length - 1 ? "1px solid rgba(255,255,255,.03)" : "none", fontSize: 13 }}>
+              {[...lineup.players].sort((a, b) => a.posicao_id - b.posicao_id).map((p, i) => { const r = p.pontos_ultimas_3.reduce((a, b) => a + b, 0) / 3; const ps = positions[p.posicao_id] || MPOS[p.posicao_id]; const isCap = lineup.captain && p.id === lineup.captain.id; return (
+                <div key={p.id} style={{ padding: "7px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: i < lineup.players.length - 1 ? "1px solid rgba(255,255,255,.03)" : "none", fontSize: 13, background: isCap ? "rgba(255,193,7,.04)" : "transparent" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: "#777", background: "rgba(255,193,7,.08)", borderRadius: 4, padding: "2px 5px", minWidth: 26, textAlign: "center", flexShrink: 0 }}>{ps?.abreviacao || "?"}</span>
-                    <span style={{ fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.apelido}</span>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: isCap ? "#FFC107" : "#777", background: isCap ? "rgba(255,193,7,.15)" : "rgba(255,193,7,.08)", borderRadius: 4, padding: "2px 5px", minWidth: 26, textAlign: "center", flexShrink: 0 }}>{ps?.abreviacao || "?"}</span>
+                    <span style={{ fontWeight: 600, color: isCap ? "#FFC107" : "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.apelido}{isCap ? " 🏅" : ""}</span>
                     <span style={{ fontSize: 10, color: "#444", flexShrink: 0 }}>{clubs[p.clube_id]?.abreviacao}</span>
                   </div>
                   <div style={{ display: "flex", gap: 16, flexShrink: 0 }}>
@@ -412,15 +444,42 @@ export default function MitouFC() {
                 <div style={{ display: "flex", gap: 12, fontFamily: "'Space Mono',monospace" }}><span style={{ color: "#FFC107" }}>C$ {lineup.totalCost.toFixed(1)}</span><span style={{ color: "#4CAF50" }}>{lineup.expectedPoints.toFixed(1)} pts</span></div>
               </div>
             </div>
-            <AdBanner style={{ marginTop: 12, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }} />
+
+            {/* Reservas table */}
+            {lineup.reserves?.length > 0 && (
+              <div style={{ margin: "12px auto 0", maxWidth: 420, background: "rgba(255,255,255,.02)", borderRadius: 12, border: "1px solid rgba(255,255,255,.06)", overflow: "hidden" }}>
+                <div style={{ padding: "8px 12px", background: "rgba(255,255,255,.03)", borderBottom: "1px solid rgba(255,255,255,.05)", display: "flex", justifyContent: "space-between", fontSize: 10, fontWeight: 700, color: "#555", letterSpacing: 1, textTransform: "uppercase" }}>
+                  <span>🔄 Reservas</span><div style={{ display: "flex", gap: 16 }}><span style={{ width: 40, textAlign: "right" }}>Preço</span><span style={{ width: 35, textAlign: "right" }}>Média</span><span style={{ width: 40, textAlign: "right" }}>Expect.</span></div>
+                </div>
+                {lineup.reserves.map((p, i) => { const r = p.pontos_ultimas_3.reduce((a, b) => a + b, 0) / 3; return (
+                  <div key={p.id} style={{ padding: "7px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: i < lineup.reserves.length - 1 ? "1px solid rgba(255,255,255,.03)" : "none", fontSize: 13, opacity: .75 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#555", background: "rgba(255,255,255,.05)", borderRadius: 4, padding: "2px 5px", minWidth: 26, textAlign: "center", flexShrink: 0 }}>{MPOS[p.posicao_id]?.abreviacao || "?"}</span>
+                      <span style={{ fontWeight: 600, color: "#aaa", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.apelido}</span>
+                      <span style={{ fontSize: 10, color: "#444", flexShrink: 0 }}>{clubs[p.clube_id]?.abreviacao}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 16, flexShrink: 0 }}>
+                      <span style={{ color: "#887730", fontWeight: 600, fontFamily: "'Space Mono',monospace", fontSize: 11, width: 40, textAlign: "right" }}>{p.preco.toFixed(1)}</span>
+                      <span style={{ color: "#666", fontFamily: "'Space Mono',monospace", fontSize: 11, width: 35, textAlign: "right" }}>{p.media.toFixed(1)}</span>
+                      <span style={{ color: r >= 5 ? "#4CAF50" : r >= 3 ? "#887730" : "#ff5252", fontWeight: 700, fontFamily: "'Space Mono',monospace", fontSize: 11, width: 40, textAlign: "right" }}>{r.toFixed(1)}</span>
+                    </div>
+                  </div>
+                ); })}
+              </div>
+            )}
+
+            {/* Spacing at bottom for scroll */}
+            <div style={{ height: 16 }} />
           </div>
         )}
 
-        {/* Chat */}
-        <div ref={chatRef} style={{ flex: 1, overflowY: "auto", padding: "12px 16px 8px" }}>
-          {messages.map((m, i) => <Msg key={i} text={m.text} isUser={m.isUser} />)}
-          {isTyping && <div style={{ display: "flex", gap: 5, padding: "8px 16px", background: "rgba(255,255,255,.04)", borderRadius: 18, width: "fit-content", border: "1px solid rgba(255,193,7,.1)" }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFC107", animation: `pulse 1.2s ease-in-out ${i * .2}s infinite` }} />)}</div>}
-        </div>
+        {/* Chat — hidden when pitch is displayed */}
+        {!showPitch && (
+          <div ref={chatRef} style={{ flex: 1, overflowY: "auto", padding: "12px 16px 8px" }}>
+            {messages.map((m, i) => <Msg key={i} text={m.text} isUser={m.isUser} />)}
+            {isTyping && <div style={{ display: "flex", gap: 5, padding: "8px 16px", background: "rgba(255,255,255,.04)", borderRadius: 18, width: "fit-content", border: "1px solid rgba(255,193,7,.1)" }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFC107", animation: `pulse 1.2s ease-in-out ${i * .2}s infinite` }} />)}</div>}
+          </div>
+        )}
 
         {/* Input */}
         <div style={{ padding: "10px 16px 16px", background: "rgba(10,15,24,.95)", backdropFilter: "blur(20px)", borderTop: "1px solid rgba(255,193,7,.06)" }}>
